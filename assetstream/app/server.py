@@ -113,19 +113,48 @@ def health():
 
 @app.get("/api/locations")
 def locations():
+    """Return locations with one-level breadcrumb labels ('Garage > IT Box').
+
+    Uses /locations/tree so we know each location's parent. The tree contains
+    both locations and items; we keep only location nodes.
+    """
     try:
-        r = _hb_request("GET", "/locations", timeout=15)
+        r = _hb_request("GET", "/locations/tree", timeout=15)
         r.raise_for_status()
-        data = r.json()
-        # HomeBox v0.25.0 returns a bare array; some builds wrap it in {"items": [...]}.
-        if isinstance(data, dict):
-            items = data.get("items", data.get("locations", []))
-        else:
-            items = data
-        out = [{"id": x["id"], "name": x["name"]} for x in items if isinstance(x, dict) and "id" in x]
+        tree = r.json()
+        if isinstance(tree, dict):
+            tree = tree.get("items", tree.get("locations", []))
+
+        out = []
+
+        def walk(nodes, parent_name):
+            for n in nodes or []:
+                if not isinstance(n, dict):
+                    continue
+                if n.get("type") and n["type"] != "location":
+                    continue  # skip item nodes, keep only locations
+                name = n.get("name", "")
+                label = f"{parent_name} \u203a {name}" if parent_name else name
+                out.append({"id": n["id"], "name": label})
+                walk(n.get("children"), name)
+
+        walk(tree, "")
+        out.sort(key=lambda x: x["name"].lower())
+        if not out:
+            raise ValueError("tree returned no locations")
         return jsonify({"locations": out, "default": HOMEBOX_LOCATION_ID})
-    except Exception as e:
-        return jsonify({"error": str(e), "locations": []}), 502
+    except Exception:
+        # Fallback: flat list without breadcrumbs (older/edge cases).
+        try:
+            r = _hb_request("GET", "/locations", timeout=15)
+            r.raise_for_status()
+            data = r.json()
+            items = data if isinstance(data, list) else data.get("items", data.get("locations", []))
+            out = [{"id": x["id"], "name": x["name"]} for x in items if isinstance(x, dict) and "id" in x]
+            out.sort(key=lambda x: x["name"].lower())
+            return jsonify({"locations": out, "default": HOMEBOX_LOCATION_ID})
+        except Exception as e:
+            return jsonify({"error": str(e), "locations": []}), 502
 
 
 @app.post("/api/analyze")
@@ -243,7 +272,32 @@ def save():
         except Exception:
             pass
 
-    result = {"id": item_id, "name": name, "photos_uploaded": uploaded}
+    # 3b) Upload the receipt as a RECEIPT-type attachment (never sent to Claude).
+    # Supports images and PDFs. This data only ever appears here, never in /analyze.
+    receipt = body.get("receipt")
+    receipt_uploaded = False
+    if receipt:
+        try:
+            header, b64 = receipt.split(",", 1)
+            media_type = header.split(";")[0].replace("data:", "") or "application/octet-stream"
+            if "pdf" in media_type:
+                ext = "pdf"
+            elif "/" in media_type:
+                ext = media_type.split("/")[-1].replace("jpeg", "jpg")
+            else:
+                ext = "bin"
+            raw = base64.b64decode(b64)
+            filename = f"receipt.{ext}"
+            files = {"file": (filename, io.BytesIO(raw), media_type)}
+            form = {"type": "receipt", "name": filename, "primary": "false"}
+            rr = _hb_request("POST", f"/items/{item_id}/attachments", files=files, data=form, timeout=45)
+            rr.raise_for_status()
+            receipt_uploaded = True
+        except Exception:
+            pass
+
+    result = {"id": item_id, "name": name, "photos_uploaded": uploaded,
+              "receipt_uploaded": receipt_uploaded}
     if field_error:
         result["warning"] = f"serial/model/brand may not have saved: {field_error}"
     return jsonify(result)

@@ -36,6 +36,9 @@
   .tile .check { position:absolute; top:8px; right:8px; background:var(--ok); color:#fff;
                  width:24px; height:24px; border-radius:50%; display:flex; align-items:center;
                  justify-content:center; font-size:14px; }
+  .tile.receipt { aspect-ratio:auto; min-height:84px; flex-direction:row; gap:14px; margin-top:2px; }
+  .tile.receipt svg { width:24px; height:24px; }
+  .tile.receipt.filled { border-style:solid; border-color:var(--ok); background:var(--ok-bg); }
   input[type=file] { display:none; }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:12px;
            padding:14px 16px; margin-top:18px; }
@@ -94,6 +97,13 @@
     </label>
   </div>
 
+  <div class="lbl">RECEIPT / INVOICE <span style="font-weight:500;color:var(--hint);letter-spacing:0">(private — never sent to Claude)</span></div>
+  <label class="tile receipt" id="t-receipt">
+    <input type="file" accept="image/*,application/pdf" id="f-receipt" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--hint)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+    <span class="cap" style="color:var(--hint)">ADD RECEIPT (PHOTO OR PDF)</span>
+  </label>
+
   <div class="panel hidden" id="panel">
     <div class="field"><label>ITEM NAME</label><input id="i-name" placeholder="—" /></div>
     <div class="row">
@@ -116,6 +126,7 @@
 
 <script>
 const photos = { front:null, serial:null };
+let receipt = null;  // {data, isPdf} — NEVER sent to /analyze
 const els = {
   btn: document.getElementById('btn'), label: document.getElementById('btn-label'),
   panel: document.getElementById('panel'), toast: document.getElementById('toast'),
@@ -166,6 +177,11 @@ function resetForNext(){
   ['i-name','i-brand','i-model','i-serial','i-desc'].forEach(id=>{
     const el = document.getElementById(id); if(el) el.value='';
   });
+  receipt = null;
+  const rt = document.getElementById('t-receipt');
+  if(rt){ rt.classList.remove('filled'); const rc=rt.querySelector('.cap');
+          rc.textContent='ADD RECEIPT (PHOTO OR PDF)'; rc.style.color='var(--hint)';
+          const ri=document.getElementById('f-receipt'); if(ri) ri.value=''; }
   els.panel.classList.add('hidden');
   els.btn.disabled = false;
   setReady();
@@ -173,6 +189,17 @@ function resetForNext(){
 
 document.getElementById('f-front').addEventListener('change', e=>onPick('front', e.target));
 document.getElementById('f-serial').addEventListener('change', e=>onPick('serial', e.target));
+document.getElementById('f-receipt').addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const url = await fileToDataURL(file);
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  receipt = { data:url, isPdf };
+  const t = document.getElementById('t-receipt');
+  t.classList.add('filled');
+  const cap = t.querySelector('.cap');
+  cap.textContent = isPdf ? ('PDF ATTACHED \u2713') : ('RECEIPT ATTACHED \u2713');
+  cap.style.color = 'var(--ok)';
+});
 
 async function loadLocations(){
   try{
@@ -217,6 +244,7 @@ els.btn.addEventListener('click', async ()=>{
         serial:document.getElementById('i-serial').value.trim(),
         description:document.getElementById('i-desc').value.trim(),
         locationId:els.loc.value, frontPhoto:photos.front, serialPhoto:photos.serial,
+        receipt: receipt ? receipt.data : null,
       };
       const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)});
@@ -225,7 +253,7 @@ els.btn.addEventListener('click', async ()=>{
         const n = d.name || 'item';
         const p = (typeof d.photos_uploaded === 'number') ? d.photos_uploaded : 0;
         if(d.warning){ toast('Saved "'+n+'" but '+d.warning); }
-        else { toast('Saved "'+n+'" + '+p+' photo(s)'); }
+        else { toast('Saved "'+n+'" + '+p+' photo(s)' + (d.receipt_uploaded ? ' + receipt' : '')); }
         resetForNext();
       } else { toast(d.error||d.warning||'Save failed'); busy(false); setReady(); }
     }catch(e){ toast('Network error'); busy(false); setReady(); }
