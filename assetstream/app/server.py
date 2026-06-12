@@ -177,7 +177,7 @@ def save():
         return jsonify({"error": "name is required"}), 400
     location_id = body.get("locationId") or HOMEBOX_LOCATION_ID
 
-    # 1) Create the item.
+    # 1) Create the item (name + description + location).
     create_payload = {"name": name, "description": body.get("description", ""), "quantity": 1}
     if location_id:
         create_payload["locationId"] = location_id
@@ -190,6 +190,18 @@ def save():
         return jsonify({"error": f"create failed: {e}", "detail": detail.text if detail else ""}), 502
 
     # 2) Update with serial / model / manufacturer.
+    # HomeBox's update sets locationId unconditionally, so a valid location is required.
+    # If the client didn't supply one, read it back from the just-created item.
+    if not location_id:
+        try:
+            cur = _hb_request("GET", f"/items/{item_id}", timeout=15)
+            cur.raise_for_status()
+            loc = cur.json().get("location") or {}
+            location_id = loc.get("id", "")
+        except Exception:
+            location_id = ""
+
+    field_error = None
     try:
         update_payload = {
             "id": item_id, "name": name, "description": body.get("description", ""),
@@ -200,11 +212,14 @@ def save():
         if location_id:
             update_payload["locationId"] = location_id
         ru = _hb_request("PUT", f"/items/{item_id}", json=update_payload, timeout=20)
+        if ru.status_code >= 400:
+            field_error = f"HTTP {ru.status_code}: {ru.text[:300]}"
         ru.raise_for_status()
     except Exception as e:
-        return jsonify({"warning": f"item created but field update failed: {e}", "id": item_id}), 207
+        if not field_error:
+            field_error = str(e)
 
-    # 3) Upload photos.
+    # 3) Upload photos regardless of whether the field update succeeded.
     uploaded = 0
     for key, primary in (("front", "true"), ("serial", "false")):
         data_url = body.get(key)
@@ -224,7 +239,10 @@ def save():
         except Exception:
             pass
 
-    return jsonify({"id": item_id, "name": name, "photos_uploaded": uploaded})
+    result = {"id": item_id, "name": name, "photos_uploaded": uploaded}
+    if field_error:
+        result["warning"] = f"serial/model/brand may not have saved: {field_error}"
+    return jsonify(result)
 
 
 if __name__ == "__main__":

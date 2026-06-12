@@ -150,6 +150,27 @@ function setReady(){
   else { els.label.textContent='Save to HomeBox'; els.btn.classList.add('save'); }
 }
 
+function resetForNext(){
+  photos.front = photos.serial = null;
+  analyzed = false;
+  ['front','serial'].forEach(w=>{
+    const t = document.getElementById('t-'+w);
+    const img = t.querySelector('img'), ck = t.querySelector('.check');
+    if(img) img.remove();
+    if(ck) ck.remove();
+    t.classList.remove('filled');
+    t.querySelectorAll('svg,.cap').forEach(e=>e.style.display='');
+    const input = document.getElementById('f-'+w);
+    if(input) input.value = '';   // critical: lets the same/again capture fire 'change'
+  });
+  ['i-name','i-brand','i-model','i-serial','i-desc'].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.value='';
+  });
+  els.panel.classList.add('hidden');
+  els.btn.disabled = false;
+  setReady();
+}
+
 document.getElementById('f-front').addEventListener('change', e=>onPick('front', e.target));
 document.getElementById('f-serial').addEventListener('change', e=>onPick('serial', e.target));
 
@@ -201,13 +222,11 @@ els.btn.addEventListener('click', async ()=>{
         body:JSON.stringify(payload)});
       const d=await r.json();
       if(r.ok){
-        toast('Saved "'+d.name+'" + '+d.photos_uploaded+' photo(s)');
-        photos.front=photos.serial=null; analyzed=false;
-        ['front','serial'].forEach(w=>{ const t=document.getElementById('t-'+w);
-          const img=t.querySelector('img'), ck=t.querySelector('.check');
-          if(img)img.remove(); if(ck)ck.remove(); t.classList.remove('filled');
-          t.querySelectorAll('svg,.cap').forEach(e=>e.style.display=''); });
-        els.panel.classList.add('hidden'); setReady();
+        const n = d.name || 'item';
+        const p = (typeof d.photos_uploaded === 'number') ? d.photos_uploaded : 0;
+        if(d.warning){ toast('Saved "'+n+'" but '+d.warning); }
+        else { toast('Saved "'+n+'" + '+p+' photo(s)'); }
+        resetForNext();
       } else { toast(d.error||d.warning||'Save failed'); busy(false); setReady(); }
     }catch(e){ toast('Network error'); busy(false); setReady(); }
   }
