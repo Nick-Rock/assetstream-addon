@@ -23,7 +23,7 @@ from flask import Flask, request, jsonify, send_from_directory
 app = Flask(__name__, static_folder="static", static_url_path="")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 HOMEBOX_URL = os.environ.get("HOMEBOX_URL", "http://homebox:7745").rstrip("/")
 HOMEBOX_PUBLIC_URL = os.environ.get("HOMEBOX_PUBLIC_URL", "").rstrip("/")
 HOMEBOX_USERNAME = os.environ.get("HOMEBOX_USERNAME", "")

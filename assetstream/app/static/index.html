@@ -146,6 +146,27 @@ function toast(msg){ els.toast.textContent=msg; els.toast.classList.add('show');
 function fileToDataURL(file){ return new Promise((res,rej)=>{
   const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
 
+// Downscale a data URL to a max long-edge for the CHEAP Claude copy only.
+// The full-resolution original is still what gets uploaded to HomeBox.
+function downscaleForAI(dataUrl, maxEdge){
+  return new Promise((res)=>{
+    try{
+      const img = new Image();
+      img.onload = ()=>{
+        const longEdge = Math.max(img.width, img.height);
+        if(longEdge <= maxEdge){ res(dataUrl); return; }  // already small enough
+        const scale = maxEdge / longEdge;
+        const w = Math.round(img.width*scale), h = Math.round(img.height*scale);
+        const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        res(cv.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = ()=>res(dataUrl);
+      img.src = dataUrl;
+    }catch(e){ res(dataUrl); }
+  });
+}
+
 async function onPick(which, input){
   const file = input.files[0]; if(!file) return;
   const url = await fileToDataURL(file);
@@ -228,8 +249,12 @@ els.btn.addEventListener('click', async ()=>{
   if(!analyzed){
     busy(true,'Analyzing…');
     try{
+      const [fAI, sAI] = await Promise.all([
+        photos.front ? downscaleForAI(photos.front, 900) : Promise.resolve(null),
+        photos.serial ? downscaleForAI(photos.serial, 1280) : Promise.resolve(null),
+      ]);
       const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({frontPhoto:photos.front, serialPhoto:photos.serial})});
+        body:JSON.stringify({frontPhoto:fAI, serialPhoto:sAI})});
       const d=await r.json();
       if(!r.ok){ toast(d.error||'Analysis failed'); busy(false,'Analyze with Claude'); return; }
       document.getElementById('i-name').value=d.name||'';
