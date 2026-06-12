@@ -25,6 +25,7 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 HOMEBOX_URL = os.environ.get("HOMEBOX_URL", "http://homebox:7745").rstrip("/")
+HOMEBOX_PUBLIC_URL = os.environ.get("HOMEBOX_PUBLIC_URL", "").rstrip("/")
 HOMEBOX_USERNAME = os.environ.get("HOMEBOX_USERNAME", "")
 HOMEBOX_PASSWORD = os.environ.get("HOMEBOX_PASSWORD", "")
 HOMEBOX_LOCATION_ID = os.environ.get("HOMEBOX_LOCATION_ID", "")
@@ -107,6 +108,7 @@ def health():
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),
         "homebox_creds_set": bool(HOMEBOX_USERNAME and HOMEBOX_PASSWORD),
         "homebox_url": HOMEBOX_URL,
+        "homebox_public_url": HOMEBOX_PUBLIC_URL,
         "model": ANTHROPIC_MODEL,
     })
 

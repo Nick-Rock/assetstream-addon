@@ -74,7 +74,13 @@
       <div class="title">AssetStream</div>
       <div class="sub">CLAUDE INVENTORY ENGINE</div>
     </div>
-    <div class="dot" title="connected"></div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <a id="hb-link" href="#" target="_blank" rel="noopener" style="display:none;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--info);text-decoration:none;">
+        HomeBox
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      <div class="dot" title="connected"></div>
+    </div>
   </div>
 
   <div class="lbl">HOMEBOX DESTINATION</div>
@@ -260,6 +266,18 @@ els.btn.addEventListener('click', async ()=>{
   }
 });
 
+async function loadHomeBoxLink(){
+  try{
+    const r = await fetch('/api/health'); const d = await r.json();
+    const url = d.homebox_public_url || d.homebox_url;
+    if(url){
+      const a = document.getElementById('hb-link');
+      a.href = url; a.style.display = 'inline-flex';
+    }
+  }catch(e){ /* link just stays hidden */ }
+}
+
+loadHomeBoxLink();
 loadLocations();
 </script>
 </body>
