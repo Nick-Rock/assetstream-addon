@@ -117,8 +117,12 @@ def locations():
         r = _hb_request("GET", "/locations", timeout=15)
         r.raise_for_status()
         data = r.json()
-        items = data.get("items", data) if isinstance(data, dict) else data
-        out = [{"id": x["id"], "name": x["name"]} for x in items]
+        # HomeBox v0.25.0 returns a bare array; some builds wrap it in {"items": [...]}.
+        if isinstance(data, dict):
+            items = data.get("items", data.get("locations", []))
+        else:
+            items = data
+        out = [{"id": x["id"], "name": x["name"]} for x in items if isinstance(x, dict) and "id" in x]
         return jsonify({"locations": out, "default": HOMEBOX_LOCATION_ID})
     except Exception as e:
         return jsonify({"error": str(e), "locations": []}), 502
