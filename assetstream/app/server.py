@@ -133,7 +133,7 @@ def analyze():
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY is not configured"}), 500
     body = request.get_json(force=True)
-    images = [img for img in (body.get("front"), body.get("serial")) if img]
+    images = [img for img in (body.get("frontPhoto"), body.get("serialPhoto")) if img]
     if not images:
         return jsonify({"error": "at least one photo is required"}), 400
 
@@ -189,28 +189,32 @@ def save():
         detail = getattr(e, "response", None)
         return jsonify({"error": f"create failed: {e}", "detail": detail.text if detail else ""}), 502
 
-    # 2) Update with serial / model / manufacturer.
-    # HomeBox's update sets locationId unconditionally, so a valid location is required.
-    # If the client didn't supply one, read it back from the just-created item.
-    if not location_id:
-        try:
-            cur = _hb_request("GET", f"/items/{item_id}", timeout=15)
-            cur.raise_for_status()
-            loc = cur.json().get("location") or {}
-            location_id = loc.get("id", "")
-        except Exception:
-            location_id = ""
-
+    # 2) Update serial / model / manufacturer using read-modify-write.
+    # HomeBox's update overwrites EVERY field (including assetId) from the payload,
+    # so we must fetch the freshly-created item, overlay our 3 fields, and PUT it
+    # back whole. Sending a partial payload would zero out assetId and trip a 500.
     field_error = None
     try:
-        update_payload = {
-            "id": item_id, "name": name, "description": body.get("description", ""),
-            "quantity": 1, "insured": False, "archived": False,
-            "serialNumber": body.get("serial", ""), "modelNumber": body.get("model", ""),
-            "manufacturer": body.get("manufacturer", ""),
-        }
+        cur = _hb_request("GET", f"/items/{item_id}", timeout=15)
+        cur.raise_for_status()
+        item = cur.json()
+
+        loc = item.get("location") or {}
+        location_id = body.get("locationId") or HOMEBOX_LOCATION_ID or loc.get("id", "")
+
+        # Start from the item's own current values, then overlay our extracted fields.
+        update_payload = dict(item)
+        update_payload["id"] = item_id
+        update_payload["serialNumber"] = body.get("serial", "")
+        update_payload["modelNumber"] = body.get("model", "")
+        update_payload["manufacturer"] = body.get("manufacturer", "")
         if location_id:
             update_payload["locationId"] = location_id
+        # Strip read-only / nested objects HomeBox doesn't accept on update.
+        for k in ("location", "parent", "attachments", "fields", "imageId",
+                  "thumbnailId", "createdAt", "updatedAt"):
+            update_payload.pop(k, None)
+
         ru = _hb_request("PUT", f"/items/{item_id}", json=update_payload, timeout=20)
         if ru.status_code >= 400:
             field_error = f"HTTP {ru.status_code}: {ru.text[:300]}"
@@ -221,7 +225,7 @@ def save():
 
     # 3) Upload photos regardless of whether the field update succeeded.
     uploaded = 0
-    for key, primary in (("front", "true"), ("serial", "false")):
+    for key, primary in (("frontPhoto", "true"), ("serialPhoto", "false")):
         data_url = body.get(key)
         if not data_url:
             continue
@@ -230,7 +234,7 @@ def save():
             media_type = header.split(";")[0].replace("data:", "") or "image/jpeg"
             ext = "jpg" if "jpeg" in media_type or "jpg" in media_type else media_type.split("/")[-1]
             raw = base64.b64decode(b64)
-            filename = f"{key}.{ext}"
+            filename = f"{key.replace('Photo','')}.{ext}"
             files = {"file": (filename, io.BytesIO(raw), media_type)}
             form = {"type": "photo", "name": filename, "primary": primary}
             ra = _hb_request("POST", f"/items/{item_id}/attachments", files=files, data=form, timeout=30)

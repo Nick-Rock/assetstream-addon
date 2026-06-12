@@ -196,7 +196,7 @@ els.btn.addEventListener('click', async ()=>{
     busy(true,'Analyzing…');
     try{
       const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({front:photos.front, serial:photos.serial})});
+        body:JSON.stringify({frontPhoto:photos.front, serialPhoto:photos.serial})});
       const d=await r.json();
       if(!r.ok){ toast(d.error||'Analysis failed'); busy(false,'Analyze with Claude'); return; }
       document.getElementById('i-name').value=d.name||'';
@@ -216,7 +216,7 @@ els.btn.addEventListener('click', async ()=>{
         model:document.getElementById('i-model').value.trim(),
         serial:document.getElementById('i-serial').value.trim(),
         description:document.getElementById('i-desc').value.trim(),
-        locationId:els.loc.value, front:photos.front, serial:photos.serial,
+        locationId:els.loc.value, frontPhoto:photos.front, serialPhoto:photos.serial,
       };
       const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)});
