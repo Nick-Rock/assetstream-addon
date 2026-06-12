@@ -2,67 +2,59 @@
 
 Claude-powered inventory capture. Snap two photos of an item (front + serial
 plate), Claude extracts the name, brand, model, and serial number, you confirm
-on screen, and it writes the item — with both photos attached — straight into
+on screen, and it writes the item - with both photos attached - straight into
 HomeBox. No spreadsheet, no manual import.
+
+Built and verified against HomeBox **v0.25.0**.
 
 ## Why this works over plain HTTP (no certificate needed)
 
-The capture tiles use your phone's **native camera** via a standard file input,
-not the browser's live-camera API. That means it works on plain `http://` with
-no HTTPS and no certificate — the exact wall that blocks the in-browser QR
-scanner does not apply here.
+The capture tiles use your phone's native camera via a standard file input, not
+the browser's live-camera API. That works on plain http:// with no HTTPS and no
+certificate - the same wall that blocks HomeBox's in-browser QR scanner does not
+apply here.
 
-The only outbound internet call is from this add-on to `api.anthropic.com` for
-the extraction step. HomeBox is reached over your LAN and never touches the
-internet.
+The only outbound internet call is from this add-on to api.anthropic.com for the
+extraction step. HomeBox is reached over your LAN and never touches the internet.
 
 ## Setup
 
-1. Install the add-on, then open its **Configuration** tab and set:
-   - `anthropic_api_key` — from console.anthropic.com (this is API billing,
-     separate from a Claude.ai subscription; vision calls are a few tokens each)
-   - `anthropic_model` — default `claude-sonnet-4-6` is a good balance; you can
-     use a cheaper model for simple labels
-   - `homebox_url` — usually `http://homebox:7745` if HomeBox runs as an add-on
-     on the same machine; otherwise `http://<NUC_IP>:7745`
-   - `homebox_token` — in HomeBox, create a user API key
-     (Profile → API keys) and paste it here. Use the form `Bearer xxxxx` if a
-     bare token is rejected.
-   - `homebox_location_id` — optional. The default storage location for new
-     items. Leave blank to pick a location in the app each time.
-2. Start the add-on and open the Web UI.
-3. On your phone, open the same URL and **Add to Home Screen** for an app icon.
+Open the add-on's Configuration tab and set:
 
-## Finding a HomeBox location ID
+- `anthropic_api_key` - from console.anthropic.com. This is API billing,
+  separate from a Claude.ai subscription; vision calls cost a few tokens each.
+- `anthropic_model` - default `claude-sonnet-4-6` is a good balance.
+- `homebox_url` - `http://homebox:7745` if HomeBox runs as an add-on on the same
+  machine, otherwise `http://<NUC_IP>:7745`.
+- `homebox_username` - your HomeBox login email.
+- `homebox_password` - your HomeBox password.
+- `homebox_location_id` - optional default location. Leave blank to choose in
+  the app each time (it loads your locations into a dropdown).
 
-Open a location in HomeBox; the ID is the UUID in the browser URL. Or leave
-`homebox_location_id` blank — the app loads your locations into a dropdown.
+Note on auth: HomeBox v0.25.0 does not yet have per-user API keys (that feature
+is on the development branch, not in this release). AssetStream therefore logs in
+with your username/password via HomeBox's login endpoint and manages the session
+token automatically, re-logging-in when it expires. Credentials are stored only
+in this add-on's config on your NUC, never in the browser.
 
 ## Using it
 
-1. Tap **Front view**, snap the product. Tap **Serial view**, snap the label.
-2. Tap **Analyze with Claude** — fields populate in a couple of seconds.
+1. Tap Front view, snap the product. Tap Serial view, snap the label.
+2. Tap Analyze with Claude - fields populate in a couple of seconds.
 3. Correct anything (OCR on a worn serial plate is never perfect), pick the
-   destination location, then **Save to HomeBox**.
+   destination location, then Save to HomeBox.
 
-## Linking it from HomeBox
-
-HomeBox has no plugin slot, but you can drop this add-on's URL into a HomeBox
-item's URL field or a location's notes for a quick jump. Simplest of all: keep
-both as home-screen icons and bounce between them.
+On your phone, open the URL and Add to Home Screen for an app icon.
 
 ## Security notes
 
-- Both API keys live only in this add-on's config on your NUC, never in the
-  browser.
-- The HomeBox token authenticates as you — treat it like a password and rotate
-  it if a device is lost.
+- Both the Anthropic key and your HomeBox credentials live only in this add-on's
+  config, never in the browser.
 - A serial-number photo is mild PII; it is sent to Anthropic only for the
-  extraction call. Choose a model/account with a no-training data policy if
-  that matters to you.
+  extraction call.
 
 ## Updating
 
-Bump `version` in `config.yaml`, push, and update from the HA App Store. To move
-to a newer Claude model later, just change `anthropic_model` in Configuration —
-no rebuild needed.
+Bump `version` in `config.yaml`, push, and update from the HA App Store. When
+HomeBox ships per-user API keys in a later release, this can be switched back to
+key-based auth - ask Claude for the updated backend at that point.

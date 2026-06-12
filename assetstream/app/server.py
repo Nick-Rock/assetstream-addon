@@ -1,32 +1,33 @@
-"""AssetStream — Claude-powered inventory capture that syncs to HomeBox.
+"""AssetStream - Claude-powered inventory capture that syncs to HomeBox.
 
-Flow:
-  1. Browser captures two photos (front + serial) via native camera file input.
-  2. POST /api/analyze  -> backend calls Claude vision, returns {name, manufacturer, model, serial, description}.
-  3. User confirms/edits on screen.
-  4. POST /api/save     -> backend creates a HomeBox entity, sets model/serial/manufacturer,
-                          and uploads both photos as attachments.
+Targets HomeBox v0.25.0 API:
+  - auth via POST /v1/users/login (username/password) -> token
+  - create  POST /v1/items            {name, description, quantity, locationId}
+  - update  PUT  /v1/items/{id}        {id, name, serialNumber, modelNumber, manufacturer, ...}
+  - photos  POST /v1/items/{id}/attachments  (multipart: file, name, type, primary)
 
-All secrets (Anthropic key, HomeBox token) live here on the server, never in the browser.
-The only outbound internet call is to api.anthropic.com for the vision step.
-HomeBox is reached over the LAN and never touches the internet.
+All secrets live here on the server, never in the browser. The only outbound
+internet call is to api.anthropic.com for the vision extraction. HomeBox is
+reached over the LAN and never touches the internet.
 """
 import base64
 import io
 import json
 import os
+import threading
+import time
 
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
-# ---- Configuration (injected by the HA add-on as env vars) ----
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 HOMEBOX_URL = os.environ.get("HOMEBOX_URL", "http://homebox:7745").rstrip("/")
-HOMEBOX_TOKEN = os.environ.get("HOMEBOX_TOKEN", "")
-HOMEBOX_LOCATION_ID = os.environ.get("HOMEBOX_LOCATION_ID", "")  # optional default location
+HOMEBOX_USERNAME = os.environ.get("HOMEBOX_USERNAME", "")
+HOMEBOX_PASSWORD = os.environ.get("HOMEBOX_PASSWORD", "")
+HOMEBOX_LOCATION_ID = os.environ.get("HOMEBOX_LOCATION_ID", "")
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
@@ -41,15 +42,57 @@ EXTRACTION_PROMPT = (
     "determinable from the photos, use an empty string. Do not guess serial numbers."
 )
 
+# ---- HomeBox session token cache (login is exchanged for a bearer token) ----
+_token = {"value": "", "exp": 0.0}
+_token_lock = threading.Lock()
 
-def _anthropic_image_block(data_url: str):
-    """Turn a data: URL from the browser into an Anthropic image content block."""
+
+def _login():
+    """Log in to HomeBox and cache the token. Returns the token string."""
+    r = requests.post(
+        f"{HOMEBOX_URL}/api/v1/users/login",
+        json={"username": HOMEBOX_USERNAME, "password": HOMEBOX_PASSWORD, "stayLoggedIn": True},
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = r.json()
+    token = data.get("token", "")
+    if not token.startswith("Bearer "):
+        token = "Bearer " + token
+    with _token_lock:
+        _token["value"] = token
+        _token["exp"] = time.time() + 6 * 3600  # refresh well before expiry
+    return token
+
+
+def _hb_token():
+    with _token_lock:
+        if _token["value"] and time.time() < _token["exp"]:
+            return _token["value"]
+    return _login()
+
+
+def _hb_headers():
+    return {"Authorization": _hb_token()}
+
+
+def _hb_request(method, path, **kwargs):
+    """Call HomeBox, transparently re-logging-in once on a 401."""
+    url = f"{HOMEBOX_URL}/api/v1{path}"
+    headers = kwargs.pop("headers", {})
+    headers.update(_hb_headers())
+    resp = requests.request(method, url, headers=headers, **kwargs)
+    if resp.status_code == 401:
+        _login()
+        headers.update(_hb_headers())
+        resp = requests.request(method, url, headers=headers, **kwargs)
+    return resp
+
+
+def _anthropic_image_block(data_url):
     header, b64 = data_url.split(",", 1)
     media_type = header.split(";")[0].replace("data:", "") or "image/jpeg"
-    return {
-        "type": "image",
-        "source": {"type": "base64", "media_type": media_type, "data": b64},
-    }
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}
 
 
 @app.get("/")
@@ -59,26 +102,19 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify(
-        {
-            "ok": True,
-            "anthropic_key_set": bool(ANTHROPIC_API_KEY),
-            "homebox_token_set": bool(HOMEBOX_TOKEN),
-            "homebox_url": HOMEBOX_URL,
-            "model": ANTHROPIC_MODEL,
-        }
-    )
+    return jsonify({
+        "ok": True,
+        "anthropic_key_set": bool(ANTHROPIC_API_KEY),
+        "homebox_creds_set": bool(HOMEBOX_USERNAME and HOMEBOX_PASSWORD),
+        "homebox_url": HOMEBOX_URL,
+        "model": ANTHROPIC_MODEL,
+    })
 
 
 @app.get("/api/locations")
 def locations():
-    """List HomeBox locations so the UI can offer a destination dropdown."""
     try:
-        r = requests.get(
-            f"{HOMEBOX_URL}/api/v1/locations",
-            headers={"Authorization": HOMEBOX_TOKEN},
-            timeout=15,
-        )
+        r = _hb_request("GET", "/locations", timeout=15)
         r.raise_for_status()
         data = r.json()
         items = data.get("items", data) if isinstance(data, dict) else data
@@ -90,10 +126,8 @@ def locations():
 
 @app.post("/api/analyze")
 def analyze():
-    """Send the two photos to Claude and return structured fields."""
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY is not configured"}), 500
-
     body = request.get_json(force=True)
     images = [img for img in (body.get("front"), body.get("serial")) if img]
     if not images:
@@ -101,7 +135,6 @@ def analyze():
 
     content = [_anthropic_image_block(img) for img in images]
     content.append({"type": "text", "text": EXTRACTION_PROMPT})
-
     try:
         r = requests.post(
             ANTHROPIC_URL,
@@ -110,19 +143,13 @@ def analyze():
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
-            json={
-                "model": ANTHROPIC_MODEL,
-                "max_tokens": 512,
-                "messages": [{"role": "user", "content": content}],
-            },
+            json={"model": ANTHROPIC_MODEL, "max_tokens": 512,
+                  "messages": [{"role": "user", "content": content}]},
             timeout=60,
         )
         r.raise_for_status()
         data = r.json()
-        text = "".join(
-            block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
-        ).strip()
-        # Strip accidental code fences, then parse.
+        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         fields = json.loads(text)
     except json.JSONDecodeError:
@@ -132,78 +159,48 @@ def analyze():
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
-    # Normalise keys we expect.
     clean = {k: str(fields.get(k, "")) for k in ("name", "manufacturer", "model", "serial", "description")}
     return jsonify(clean)
 
 
-def _hb_headers():
-    return {"Authorization": HOMEBOX_TOKEN}
-
-
 @app.post("/api/save")
 def save():
-    """Create the HomeBox item, set serial/model/manufacturer, attach both photos."""
-    if not HOMEBOX_TOKEN:
-        return jsonify({"error": "HOMEBOX_TOKEN is not configured"}), 500
-
+    if not (HOMEBOX_USERNAME and HOMEBOX_PASSWORD):
+        return jsonify({"error": "HomeBox username/password not configured"}), 500
     body = request.get_json(force=True)
     name = (body.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
-
     location_id = body.get("locationId") or HOMEBOX_LOCATION_ID
 
-    # 1) Create the entity (item).
-    create_payload = {
-        "name": name,
-        "description": body.get("description", ""),
-        "quantity": 1,
-    }
+    # 1) Create the item.
+    create_payload = {"name": name, "description": body.get("description", ""), "quantity": 1}
     if location_id:
-        # HomeBox treats a location as a parent entity.
-        create_payload["parentId"] = location_id
-
+        create_payload["locationId"] = location_id
     try:
-        r = requests.post(
-            f"{HOMEBOX_URL}/api/v1/entities",
-            headers=_hb_headers(),
-            json=create_payload,
-            timeout=20,
-        )
+        r = _hb_request("POST", "/items", json=create_payload, timeout=20)
         r.raise_for_status()
-        entity = r.json()
-        entity_id = entity["id"]
+        item_id = r.json()["id"]
     except Exception as e:
         detail = getattr(e, "response", None)
         return jsonify({"error": f"create failed: {e}", "detail": detail.text if detail else ""}), 502
 
-    # 2) Patch the structured fields (serial / model / manufacturer) via update.
+    # 2) Update with serial / model / manufacturer.
     try:
         update_payload = {
-            "id": entity_id,
-            "name": name,
-            "description": body.get("description", ""),
-            "quantity": 1,
-            "serialNumber": body.get("serial", ""),
-            "modelNumber": body.get("model", ""),
+            "id": item_id, "name": name, "description": body.get("description", ""),
+            "quantity": 1, "insured": False, "archived": False,
+            "serialNumber": body.get("serial", ""), "modelNumber": body.get("model", ""),
             "manufacturer": body.get("manufacturer", ""),
-            "insured": False,
         }
         if location_id:
-            update_payload["parentId"] = location_id
-        ru = requests.put(
-            f"{HOMEBOX_URL}/api/v1/entities/{entity_id}",
-            headers=_hb_headers(),
-            json=update_payload,
-            timeout=20,
-        )
+            update_payload["locationId"] = location_id
+        ru = _hb_request("PUT", f"/items/{item_id}", json=update_payload, timeout=20)
         ru.raise_for_status()
     except Exception as e:
-        # Item exists but fields didn't fully set — report, don't crash.
-        return jsonify({"warning": f"item created but fields update failed: {e}", "id": entity_id}), 207
+        return jsonify({"warning": f"item created but field update failed: {e}", "id": item_id}), 207
 
-    # 3) Upload photos as attachments.
+    # 3) Upload photos.
     uploaded = 0
     for key, primary in (("front", "true"), ("serial", "false")):
         data_url = body.get(key)
@@ -217,19 +214,13 @@ def save():
             filename = f"{key}.{ext}"
             files = {"file": (filename, io.BytesIO(raw), media_type)}
             form = {"type": "photo", "name": filename, "primary": primary}
-            ra = requests.post(
-                f"{HOMEBOX_URL}/api/v1/entities/{entity_id}/attachments",
-                headers=_hb_headers(),
-                files=files,
-                data=form,
-                timeout=30,
-            )
+            ra = _hb_request("POST", f"/items/{item_id}/attachments", files=files, data=form, timeout=30)
             ra.raise_for_status()
             uploaded += 1
         except Exception:
-            pass  # one failed photo shouldn't sink the whole save
+            pass
 
-    return jsonify({"id": entity_id, "name": name, "photos_uploaded": uploaded})
+    return jsonify({"id": item_id, "name": name, "photos_uploaded": uploaded})
 
 
 if __name__ == "__main__":
