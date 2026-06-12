@@ -1,0 +1,29 @@
+name: AssetStream
+version: "1.0.0"
+slug: assetstream
+description: Claude-powered photo capture that extracts item data and syncs it to HomeBox
+url: https://github.com/YOUR_GITHUB_USERNAME/assetstream-addon
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: AssetStream web interface
+webui: http://[HOST]:[PORT:8099]
+hassio_api: true
+options:
+  anthropic_api_key: ""
+  anthropic_model: "claude-sonnet-4-6"
+  homebox_url: "http://homebox:7745"
+  homebox_token: ""
+  homebox_location_id: ""
+schema:
+  anthropic_api_key: password
+  anthropic_model: str
+  homebox_url: str
+  homebox_token: password
+  homebox_location_id: str?

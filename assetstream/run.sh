@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bashio
+export ANTHROPIC_API_KEY="$(bashio::config 'anthropic_api_key')"
+export ANTHROPIC_MODEL="$(bashio::config 'anthropic_model')"
+export HOMEBOX_URL="$(bashio::config 'homebox_url')"
+export HOMEBOX_TOKEN="$(bashio::config 'homebox_token')"
+export HOMEBOX_LOCATION_ID="$(bashio::config 'homebox_location_id')"
+export PORT=8099
+cd /app
+exec gunicorn --bind 0.0.0.0:8099 --workers 2 --timeout 120 server:app

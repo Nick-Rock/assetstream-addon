@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AssetStream</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1a1a2e; --muted:#6b7280; --hint:#9ca3af;
+          --info:#2563eb; --info-bg:#eaf1fc; --info-bd:#bcd4f5; --ok:#16a34a; --ok-bg:#e8f6ec;
+          --line:#e5e7eb; --danger:#dc2626; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         background:var(--bg); color:var(--ink); padding:env(safe-area-inset-top) 0 0; }
+  .wrap { max-width:480px; margin:0 auto; padding:20px 18px 120px; }
+  .head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:22px; }
+  .title { font-size:24px; font-weight:700; letter-spacing:-0.02em; }
+  .sub { font-size:11px; font-weight:600; color:var(--hint); letter-spacing:0.09em; }
+  .dot { width:14px; height:14px; border-radius:50%; background:var(--ok); margin-top:5px; }
+  .lbl { font-size:11px; font-weight:700; color:var(--hint); letter-spacing:0.09em; margin:18px 0 8px; }
+  .conn { display:flex; align-items:center; justify-content:space-between; background:var(--card);
+          border:1px solid var(--line); border-radius:10px; padding:13px 15px; }
+  .conn select { border:0; background:transparent; font-size:15px; font-weight:600; color:var(--ink);
+                 max-width:62%; -webkit-appearance:none; appearance:none; }
+  .badge { font-size:11px; font-weight:700; color:var(--ok); background:var(--ok-bg);
+           padding:4px 10px; border-radius:8px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .tile { position:relative; aspect-ratio:1; border-radius:14px; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; gap:10px; cursor:pointer; overflow:hidden;
+          background:var(--card); border:1.5px dashed var(--line); transition:.15s; }
+  .tile.primary { background:var(--info-bg); border:1.5px solid var(--info-bd); }
+  .tile.filled { border-style:solid; border-color:var(--ok); }
+  .tile svg { width:30px; height:30px; }
+  .tile .cap { font-size:12px; font-weight:700; letter-spacing:0.04em; }
+  .tile.primary .cap, .tile.primary svg { color:var(--info); }
+  .tile img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .tile .check { position:absolute; top:8px; right:8px; background:var(--ok); color:#fff;
+                 width:24px; height:24px; border-radius:50%; display:flex; align-items:center;
+                 justify-content:center; font-size:14px; }
+  input[type=file] { display:none; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px;
+           padding:14px 16px; margin-top:18px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:11px; font-weight:700; color:var(--muted);
+                 letter-spacing:0.05em; margin-bottom:4px; }
+  .field input { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+                 font-size:15px; color:var(--ink); }
+  .field input.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .row { display:flex; gap:10px; } .row .field { flex:1; }
+  .cta { position:fixed; left:0; right:0; bottom:0; padding:14px 18px calc(14px + env(safe-area-inset-bottom));
+         background:linear-gradient(to top,var(--bg) 70%,transparent); }
+  .cta-inner { max-width:480px; margin:0 auto; }
+  button.go { width:100%; border:0; border-radius:11px; padding:16px; font-size:16px; font-weight:700;
+              color:#fff; background:var(--info); display:flex; align-items:center; justify-content:center;
+              gap:8px; }
+  button.go:disabled { opacity:.45; }
+  button.go.save { background:var(--ok); }
+  .toast { position:fixed; left:50%; bottom:96px; transform:translateX(-50%); background:var(--ink);
+           color:#fff; font-size:14px; padding:11px 18px; border-radius:10px; opacity:0; transition:.25s;
+           pointer-events:none; max-width:90%; text-align:center; }
+  .toast.show { opacity:1; }
+  .spin { width:18px; height:18px; border:2px solid rgba(255,255,255,.4); border-top-color:#fff;
+          border-radius:50%; animation:r .7s linear infinite; }
+  @keyframes r { to { transform:rotate(360deg); } }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div>
+      <div class="title">AssetStream</div>
+      <div class="sub">CLAUDE INVENTORY ENGINE</div>
+    </div>
+    <div class="dot" title="connected"></div>
+  </div>
+
+  <div class="lbl">HOMEBOX DESTINATION</div>
+  <div class="conn">
+    <select id="loc"><option>Loading locations…</option></select>
+    <span class="badge">SYNCED</span>
+  </div>
+
+  <div class="lbl">ACTIVE SCANNING</div>
+  <div class="grid">
+    <label class="tile primary" id="t-front">
+      <input type="file" accept="image/*" capture="environment" id="f-front" />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      <span class="cap">FRONT VIEW</span>
+    </label>
+    <label class="tile" id="t-serial">
+      <input type="file" accept="image/*" capture="environment" id="f-serial" />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--hint)"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      <span class="cap" style="color:var(--hint)">SERIAL VIEW</span>
+    </label>
+  </div>
+
+  <div class="panel hidden" id="panel">
+    <div class="field"><label>ITEM NAME</label><input id="i-name" placeholder="—" /></div>
+    <div class="row">
+      <div class="field"><label>BRAND</label><input id="i-brand" placeholder="—" /></div>
+      <div class="field"><label>MODEL</label><input id="i-model" placeholder="—" /></div>
+    </div>
+    <div class="field"><label>SERIAL NUMBER</label><input id="i-serial" class="mono" placeholder="—" /></div>
+    <div class="field"><label>DESCRIPTION</label><input id="i-desc" placeholder="—" /></div>
+  </div>
+</div>
+
+<div class="cta">
+  <div class="cta-inner">
+    <button class="go" id="btn" disabled>
+      <span id="btn-label">Add a photo to begin</span>
+    </button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const photos = { front:null, serial:null };
+const els = {
+  btn: document.getElementById('btn'), label: document.getElementById('btn-label'),
+  panel: document.getElementById('panel'), toast: document.getElementById('toast'),
+  loc: document.getElementById('loc'),
+};
+let analyzed = false;
+
+function toast(msg){ els.toast.textContent=msg; els.toast.classList.add('show');
+  setTimeout(()=>els.toast.classList.remove('show'), 2600); }
+
+function fileToDataURL(file){ return new Promise((res,rej)=>{
+  const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+
+async function onPick(which, input){
+  const file = input.files[0]; if(!file) return;
+  const url = await fileToDataURL(file);
+  photos[which] = url;
+  const tile = document.getElementById('t-'+which);
+  tile.classList.add('filled');
+  tile.querySelectorAll('svg,.cap').forEach(e=>e.style.display='none');
+  if(!tile.querySelector('img')){
+    const img=document.createElement('img'); img.src=url; tile.appendChild(img);
+    const ck=document.createElement('div'); ck.className='check'; ck.innerHTML='&#10003;'; tile.appendChild(ck);
+  } else { tile.querySelector('img').src=url; }
+  analyzed=false; setReady();
+}
+function setReady(){
+  const has = photos.front || photos.serial;
+  els.btn.disabled = !has;
+  if(!has){ els.label.textContent='Add a photo to begin'; els.btn.classList.remove('save'); return; }
+  if(!analyzed){ els.label.textContent='Analyze with Claude'; els.btn.classList.remove('save'); }
+  else { els.label.textContent='Save to HomeBox'; els.btn.classList.add('save'); }
+}
+
+document.getElementById('f-front').addEventListener('change', e=>onPick('front', e.target));
+document.getElementById('f-serial').addEventListener('change', e=>onPick('serial', e.target));
+
+async function loadLocations(){
+  try{
+    const r = await fetch('/api/locations'); const d = await r.json();
+    els.loc.innerHTML='';
+    if(!d.locations || !d.locations.length){
+      els.loc.innerHTML='<option value="">(no locations — set in HomeBox)</option>'; return;
+    }
+    for(const l of d.locations){
+      const o=document.createElement('option'); o.value=l.id; o.textContent=l.name;
+      if(l.id===d.default) o.selected=true; els.loc.appendChild(o);
+    }
+  }catch(e){ els.loc.innerHTML='<option value="">(HomeBox unreachable)</option>'; }
+}
+
+function busy(on, text){ els.btn.disabled=on;
+  els.label.innerHTML = on ? '<span class="spin"></span>&nbsp;'+text : text; }
+
+els.btn.addEventListener('click', async ()=>{
+  if(!analyzed){
+    busy(true,'Analyzing…');
+    try{
+      const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({front:photos.front, serial:photos.serial})});
+      const d=await r.json();
+      if(!r.ok){ toast(d.error||'Analysis failed'); busy(false,'Analyze with Claude'); return; }
+      document.getElementById('i-name').value=d.name||'';
+      document.getElementById('i-brand').value=d.manufacturer||'';
+      document.getElementById('i-model').value=d.model||'';
+      document.getElementById('i-serial').value=d.serial||'';
+      document.getElementById('i-desc').value=d.description||'';
+      els.panel.classList.remove('hidden');
+      analyzed=true; busy(false); setReady();
+    }catch(e){ toast('Network error'); busy(false,'Analyze with Claude'); }
+  } else {
+    busy(true,'Saving…');
+    try{
+      const payload={
+        name:document.getElementById('i-name').value.trim(),
+        manufacturer:document.getElementById('i-brand').value.trim(),
+        model:document.getElementById('i-model').value.trim(),
+        serial:document.getElementById('i-serial').value.trim(),
+        description:document.getElementById('i-desc').value.trim(),
+        locationId:els.loc.value, front:photos.front, serial:photos.serial,
+      };
+      const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(r.ok){
+        toast('Saved "'+d.name+'" + '+d.photos_uploaded+' photo(s)');
+        photos.front=photos.serial=null; analyzed=false;
+        ['front','serial'].forEach(w=>{ const t=document.getElementById('t-'+w);
+          const img=t.querySelector('img'), ck=t.querySelector('.check');
+          if(img)img.remove(); if(ck)ck.remove(); t.classList.remove('filled');
+          t.querySelectorAll('svg,.cap').forEach(e=>e.style.display=''); });
+        els.panel.classList.add('hidden'); setReady();
+      } else { toast(d.error||d.warning||'Save failed'); busy(false); setReady(); }
+    }catch(e){ toast('Network error'); busy(false); setReady(); }
+  }
+});
+
+loadLocations();
+</script>
+</body>
+</html>
